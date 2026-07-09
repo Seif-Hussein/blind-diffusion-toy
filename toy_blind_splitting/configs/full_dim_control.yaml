@@ -1,0 +1,13 @@
+prior: full
+d_values: [20, 100, 500]
+intrinsic_k: full
+A_type: random
+measurement_ratios: [0.25, 0.5, 1.0]
+n_trials: 100
+n_steps: 200
+eta_values: [0.001, 0.003, 0.01, 0.03, 0.1]
+beta_values: [0.0, 0.1, 0.3]
+sigma_min: 0.02
+sigma_max: 1.5
+grid_size: 81
+

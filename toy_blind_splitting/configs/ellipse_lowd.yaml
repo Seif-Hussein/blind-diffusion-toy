@@ -1,0 +1,14 @@
+prior: ellipse
+d_values: [2]
+intrinsic_k: 2
+curve_components: 64
+A_type: random
+measurement_ratios: [0.5, 1.0]
+n_trials: 100
+n_steps: 200
+eta_values: [0.001, 0.003, 0.01, 0.03, 0.1]
+beta_values: [0.0, 0.1, 0.3]
+sigma_min: 0.02
+sigma_max: 1.5
+grid_size: 81
+
