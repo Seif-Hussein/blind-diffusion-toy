@@ -64,11 +64,12 @@ The hierarchy includes:
 
 - `posterior_oracle`
 - `prior_exact_cstar`
-- `blind_prior_split`
+- `blind_split`
 - `blind_naive_force`
 - `scheduled_split`
+- `scheduled_pdhg_split`
 - `posterior_scale_split`
-- `raw_pnp_hqs`
+- `raw_hqs`
 
 The key output is:
 
@@ -161,16 +162,18 @@ settings:
 python -m posterior_bddm_oracle.src.experiments_posterior_closed_loop_torch \
   --device auto \
   --prior ellipse \
-  --d-values 50,100,500 \
-  --eta-values 0.03,0.1,0.3 \
+  --d-values 100,500 \
+  --eta-values 0.05,0.075,0.1,0.15,0.2 \
   --measurement-ratios 0.5 \
   --noise-stds 0.08 \
-  --n-trials 64 \
-  --n-steps 40 \
+  --n-trials 128 \
+  --n-steps 80 \
   --init posterior \
-  --beta 0.05 \
+  --h 0.05 \
+  --beta 0 \
   --split gradient \
-  --out posterior_bddm_oracle/results_cuda_closed_loop
+  --pdhg-gamma 100 \
+  --out posterior_bddm_oracle/results_cuda_closed_loop_calibrated_baseline
 ```
 
 This runner includes:
@@ -180,15 +183,20 @@ This runner includes:
 - `blind_split`
 - `blind_naive_force`
 - `scheduled_split`
+- `scheduled_pdhg_split`
 - `posterior_scale_split`
 - `raw_hqs`
 
 The key output is:
 
 ```text
-posterior_bddm_oracle/results_cuda_closed_loop/data/closed_loop_cuda_report.md
+posterior_bddm_oracle/results_cuda_closed_loop_calibrated_baseline/data/closed_loop_cuda_report.md
 ```
 
 Use `--init posterior` for the oracle hierarchy because the posterior BDDM
 drift assumes states lie near `pi_sigma`. The older `--init prior_mean` mode is
 kept as a stress test, but it is not the clean oracle diagnostic.
+`scheduled_pdhg_split` is the reasonable scheduled baseline for this pass: it
+uses the same scheduled sigma path as `scheduled_split`, but carries a finite
+dual variable across iterations instead of recomputing a stateless gradient-like
+force each step.

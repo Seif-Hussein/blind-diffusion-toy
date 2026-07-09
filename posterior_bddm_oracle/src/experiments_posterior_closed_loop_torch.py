@@ -22,6 +22,7 @@ from .torch_oracle_tools import (
     make_operator,
     parse_float_list,
     parse_int_list,
+    pdhg_force,
     relative_error,
     split_force,
     sync,
@@ -34,6 +35,7 @@ METHOD_NAMES = [
     "blind_split",
     "blind_naive_force",
     "scheduled_split",
+    "scheduled_pdhg_split",
     "posterior_scale_split",
     "raw_hqs",
 ]
@@ -263,6 +265,7 @@ def _run_method(
             ).detach().cpu().numpy().astype(np.float32)
         return x, hist
 
+    pdhg_w = None
     for step, sigma_sched in enumerate(schedule, start=1):
         c_star = None
         c_split = None
@@ -309,6 +312,16 @@ def _run_method(
             m_prior, c_star, c_split, _force = _split_correction(
                 prior, posterior_prior, Y, sigmas, split_name, y_obs, A, noise_std, eta, pdhg_gamma, hqs_tau
             )
+            drift = (m_prior - Y) + c_split
+            x_eval_prior = prior
+        elif method == "scheduled_pdhg_split":
+            sigmas = sigma_sched
+            m_prior = prior.denoise(Y, sigmas)
+            m_post = posterior_prior.denoise(Y, sigmas)
+            c_star = m_post - m_prior
+            force, pdhg_w = pdhg_force(m_prior, y_obs, A, noise_std, pdhg_gamma, w=pdhg_w)
+            shifted = Y - float(eta) * sigmas.square() * force
+            c_split = prior.denoise(shifted, sigmas) - m_prior
             drift = (m_prior - Y) + c_split
             x_eval_prior = prior
         elif method == "posterior_scale_split":
@@ -414,7 +427,7 @@ def _write_report(path: Path, payload: dict) -> None:
 
     lines = ["# CUDA Closed-Loop Posterior-BDDM Hierarchy", ""]
     lines.append(f"Device: `{payload['device']}`")
-    lines.append(f"Split correction: `{payload['split_name']}`")
+    lines.append(f"Stateless split correction: `{payload['split_name']}`")
     lines.append(
         "Posterior oracle vs prior+exact-cstar final MSE by condition: "
         + ", ".join(f"{v:.3e}" for v in decomp)
