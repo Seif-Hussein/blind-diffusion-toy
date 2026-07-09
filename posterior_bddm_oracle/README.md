@@ -129,3 +129,38 @@ python -m posterior_bddm_oracle.src.experiments_posterior_oracle_torch \
 This runner computes exact dense-GMM posterior components, posterior-smoothed
 denoisers, `c_star`, and split corrections using Torch tensors. It runs on CPU
 locally and switches to CUDA automatically when a GPU runtime is available.
+
+## CUDA closed-loop hierarchy
+
+After the one-step correction and amplitude sweeps, run the reduced closed-loop
+posterior-BDDM hierarchy:
+
+```bash
+python -m posterior_bddm_oracle.src.experiments_posterior_closed_loop_torch \
+  --device auto \
+  --prior ellipse \
+  --d-values 50,100,500 \
+  --eta-values 0.03,0.1,0.3 \
+  --measurement-ratios 0.5 \
+  --noise-stds 0.08 \
+  --n-trials 64 \
+  --n-steps 40 \
+  --split gradient \
+  --out posterior_bddm_oracle/results_cuda_closed_loop
+```
+
+This runner includes:
+
+- `posterior_oracle`
+- `prior_exact_cstar`
+- `blind_split`
+- `blind_naive_force`
+- `scheduled_split`
+- `posterior_scale_split`
+- `raw_hqs`
+
+The key output is:
+
+```text
+posterior_bddm_oracle/results_cuda_closed_loop/data/closed_loop_cuda_report.md
+```
