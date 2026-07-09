@@ -17,6 +17,7 @@ env/
 # Generated experiment artifacts
 toy_blind_splitting/results/
 toy_blind_splitting/colab_results/
+posterior_bddm_oracle/results*/
 results/
 *.npz
 *.npy
