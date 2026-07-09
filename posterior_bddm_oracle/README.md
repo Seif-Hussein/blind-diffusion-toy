@@ -95,6 +95,12 @@ On Colab, open:
 posterior_bddm_oracle/notebooks/posterior_bddm_cuda_colab.ipynb
 ```
 
+For the calibrated closed-loop run only, open:
+
+```text
+posterior_bddm_oracle/notebooks/posterior_bddm_calibrated_closed_loop_colab.ipynb
+```
+
 The full Colab command is:
 
 ```bash
