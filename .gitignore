@@ -18,6 +18,7 @@ env/
 toy_blind_splitting/results/
 toy_blind_splitting/colab_results/
 posterior_bddm_oracle/results*/
+blind_splitting_bddm/results*/
 results/
 *.npz
 *.npy
