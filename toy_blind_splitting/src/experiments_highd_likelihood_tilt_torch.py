@@ -8,7 +8,8 @@ The target is the first-order/noisy-coordinate likelihood-tilt question:
 
 - scheduled noisy likelihood tilt;
 - blind MLE noisy likelihood tilt;
-- tuned raw clean-space PnP;
+- oracle-scale MLE noisy likelihood tilt;
+- uncapped and tuned raw clean-space PnP;
 - unscaled noisy-coordinate shift.
 
 No full posterior covariance and no Kalman assimilation are computed here.
@@ -347,9 +348,11 @@ def blind_mle_tilt(
     n_steps: int,
     eta: float,
     h: float,
+    init_sigma: float | torch.Tensor,
     gen: torch.Generator,
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
-    Y = prior.mean[None, :] + prior.sigma_grid[-1] * torch.randn(
+    init_sigma_t = torch.as_tensor(init_sigma, device=prior.device, dtype=prior.dtype)
+    Y = prior.mean[None, :] + init_sigma_t * torch.randn(
         meas.x_true.shape, device=prior.device, dtype=prior.dtype, generator=gen
     )
     sigmas = []
@@ -365,6 +368,20 @@ def blind_mle_tilt(
         Y = Y_tilde + h * (x_tilde - Y_tilde)
     sigmas.append(prior.sigma_mle(Y))
     return prior.denoise_by_sigma_idx(Y, prior.sigma_mle_idx(Y)), sigmas
+
+
+def oracle_mle_tilt(
+    prior: FastEllipseTorchPrior,
+    meas: BatchedMeasurement,
+    n_steps: int,
+    eta: float,
+    h: float,
+    init_sigma: float | torch.Tensor,
+    gen: torch.Generator,
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    # For the closed-form MLE blind denoiser, the oracle-scale nonblind update
+    # is the same computation with the inferred sigma passed explicitly.
+    return blind_mle_tilt(prior, meas, n_steps, eta, h, init_sigma, gen)
 
 
 def unscaled_noisy(
@@ -414,6 +431,27 @@ def raw_pnp_tuned(
     return x, sigmas
 
 
+def raw_pnp_uncapped(
+    prior: FastEllipseTorchPrior,
+    meas: BatchedMeasurement,
+    schedule: torch.Tensor,
+    eta: float,
+    gen: torch.Generator,
+    sigma_probe_stride: int,
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    Y0 = prior.mean[None, :] + schedule[0] * torch.randn(
+        meas.x_true.shape, device=prior.device, dtype=prior.dtype, generator=gen
+    )
+    x = prior.denoise(Y0, schedule[0])
+    sigmas = [prior.sigma_mle(x)]
+    for step, sigma in enumerate(schedule):
+        g = data_gradient(x, meas)
+        x = prior.denoise(x - float(eta) * g, sigma)
+        if (step + 1) % sigma_probe_stride == 0 or step + 1 == schedule.numel():
+            sigmas.append(prior.sigma_mle(x))
+    return x, sigmas
+
+
 def run_method(
     method: str,
     prior: FastEllipseTorchPrior,
@@ -428,7 +466,11 @@ def run_method(
     if method == "scheduled_tilt":
         return scheduled_tilt(prior, meas, schedule, eta, h, gen, sigma_probe_stride)
     if method == "blind_mle_tilt":
-        return blind_mle_tilt(prior, meas, schedule.numel(), eta, h, gen)
+        return blind_mle_tilt(prior, meas, schedule.numel(), eta, h, schedule[0], gen)
+    if method == "oracle_mle_tilt":
+        return oracle_mle_tilt(prior, meas, schedule.numel(), eta, h, schedule[0], gen)
+    if method == "raw_pnp_uncapped":
+        return raw_pnp_uncapped(prior, meas, schedule, eta, gen, sigma_probe_stride)
     if method == "raw_pnp_tuned":
         return raw_pnp_tuned(prior, meas, schedule, eta, raw_step_cap, gen, sigma_probe_stride)
     if method == "unscaled_noisy":
@@ -480,11 +522,21 @@ def write_report(path: Path, payload: dict) -> None:
         s = methods.index("scheduled_tilt")
         ratio = np.nanmedian(metrics[..., b, mse] / np.maximum(metrics[..., s, mse], 1e-12))
         lines.append(f"Blind/scheduled median MSE ratio: `{ratio:.3f}`.")
+    if "blind_mle_tilt" in methods and "oracle_mle_tilt" in methods:
+        b = methods.index("blind_mle_tilt")
+        o = methods.index("oracle_mle_tilt")
+        ratio = np.nanmedian(metrics[..., b, mse] / np.maximum(metrics[..., o, mse], 1e-12))
+        lines.append(f"Blind/oracle-MLE median MSE ratio: `{ratio:.3f}`.")
+    if "raw_pnp_uncapped" in methods and "blind_mle_tilt" in methods:
+        r = methods.index("raw_pnp_uncapped")
+        b = methods.index("blind_mle_tilt")
+        ratio = np.nanmedian(metrics[..., b, mse] / np.maximum(metrics[..., r, mse], 1e-12))
+        lines.append(f"Blind/raw-PnP-uncapped median MSE ratio: `{ratio:.3f}`.")
     if "raw_pnp_tuned" in methods and "blind_mle_tilt" in methods:
         r = methods.index("raw_pnp_tuned")
         b = methods.index("blind_mle_tilt")
         ratio = np.nanmedian(metrics[..., b, mse] / np.maximum(metrics[..., r, mse], 1e-12))
-        lines.append(f"Blind/raw-PnP median MSE ratio: `{ratio:.3f}`.")
+        lines.append(f"Blind/raw-PnP-tuned median MSE ratio: `{ratio:.3f}`.")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -533,6 +585,7 @@ def write_plots(fig_dir: Path, payload: dict) -> None:
     metric_names = [str(x) for x in payload["metric_names"]]
     mse = metric_names.index("mse_true")
     meas = metric_names.index("measurement_mse")
+    nlj = metric_names.index("neg_log_joint")
     sig_med = metric_names.index("median_sigma_hat")
     sig_min_hit = metric_names.index("sigma_min_hit")
     sig_max_hit = metric_names.index("sigma_max_hit")
@@ -563,6 +616,19 @@ def write_plots(fig_dir: Path, payload: dict) -> None:
     ax.legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(fig_dir / "mse_by_eta.png", dpi=180)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(6.2, 3.8))
+    for mi, method in enumerate(methods):
+        values = np.nanmedian(metrics[:, :, :, mi, nlj], axis=(0, 2))
+        ax.plot(eta_values, values, marker="o", label=method)
+    ax.set_xscale("log")
+    ax.set_xlabel("eta")
+    ax.set_ylabel("median negative log joint")
+    ax.set_title("High-D likelihood tilt: joint objective by eta")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(fig_dir / "neg_log_joint_by_eta.png", dpi=180)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
@@ -609,6 +675,67 @@ def write_plots(fig_dir: Path, payload: dict) -> None:
     fig.savefig(fig_dir / "sigma_boundary_hits.png", dpi=180)
     plt.close(fig)
 
+    fig, ax = plt.subplots(figsize=(6.2, 3.8))
+    for mi, method in enumerate(methods):
+        min_hit = np.nanmean(metrics[:, :, :, mi, sig_min_hit], axis=(0, 2))
+        max_hit = np.nanmean(metrics[:, :, :, mi, sig_max_hit], axis=(0, 2))
+        ax.plot(eta_values, min_hit, marker="o", linestyle="-", label=f"{method} min")
+        ax.plot(eta_values, max_hit, marker="s", linestyle="--", label=f"{method} max")
+    ax.set_xscale("log")
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_xlabel("eta")
+    ax.set_ylabel("boundary hit rate")
+    ax.set_title("Sigma-grid boundary hits by eta")
+    ax.legend(fontsize=6, ncol=2)
+    fig.tight_layout()
+    fig.savefig(fig_dir / "sigma_boundary_hits_by_eta.png", dpi=180)
+    plt.close(fig)
+
+    def plot_ratio(numer_method: str, denom_method: str, filename: str, title: str) -> None:
+        if numer_method not in methods or denom_method not in methods:
+            return
+        numer = methods.index(numer_method)
+        denom = methods.index(denom_method)
+        ratio = np.nanmedian(
+            metrics[:, :, :, numer, mse] / np.maximum(metrics[:, :, :, denom, mse], 1e-12),
+            axis=(0, 2),
+        )
+        fig, ax = plt.subplots(figsize=(6.2, 3.8))
+        ax.axhline(1.0, color="black", linewidth=1.0, linestyle="--")
+        ax.plot(eta_values, ratio, marker="o")
+        ax.set_xscale("log")
+        ax.set_xlabel("eta")
+        ax.set_ylabel("median MSE ratio")
+        ax.set_title(title)
+        fig.tight_layout()
+        fig.savefig(fig_dir / filename, dpi=180)
+        plt.close(fig)
+
+    plot_ratio(
+        "blind_mle_tilt",
+        "scheduled_tilt",
+        "blind_vs_scheduled_mse_ratio_by_eta.png",
+        "Blind MLE / scheduled MSE by eta",
+    )
+    plot_ratio(
+        "blind_mle_tilt",
+        "oracle_mle_tilt",
+        "blind_vs_oracle_mse_ratio_by_eta.png",
+        "Blind MLE / oracle MLE MSE by eta",
+    )
+    plot_ratio(
+        "blind_mle_tilt",
+        "raw_pnp_uncapped",
+        "blind_vs_raw_uncapped_mse_ratio_by_eta.png",
+        "Blind MLE / raw PnP uncapped MSE by eta",
+    )
+    plot_ratio(
+        "blind_mle_tilt",
+        "raw_pnp_tuned",
+        "blind_vs_raw_tuned_mse_ratio_by_eta.png",
+        "Blind MLE / raw PnP tuned MSE by eta",
+    )
+
 
 def run_experiment(
     *,
@@ -617,13 +744,13 @@ def run_experiment(
     d_values: list[int] | None = None,
     measurement_ratio: float = 0.5,
     eta_values: list[float] | None = None,
-    n_trials: int = 64,
+    n_trials: int = 32,
     batch_size: int = 16,
     n_steps: int = 80,
     components: int = 16,
-    grid_size: int = 41,
+    grid_size: int = 49,
     sigma_min: float = 0.005,
-    sigma_max: float = 3.0,
+    sigma_max: float = 10.0,
     schedule_sigma_min: float = 0.02,
     sigma0: float = 1.2,
     noise_std: float = 0.08,
@@ -636,9 +763,20 @@ def run_experiment(
 ) -> dict:
     device = _device(device_name)
     dtype = torch.float64 if dtype_name == "float64" else torch.float32
-    d_values = [200, 500, 1000, 2000] if d_values is None else d_values
-    eta_values = [1e-3, 3e-3, 1e-2] if eta_values is None else eta_values
-    methods = ["scheduled_tilt", "blind_mle_tilt", "raw_pnp_tuned", "unscaled_noisy"] if methods is None else methods
+    d_values = [500, 1000] if d_values is None else d_values
+    eta_values = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2] if eta_values is None else eta_values
+    methods = (
+        [
+            "scheduled_tilt",
+            "blind_mle_tilt",
+            "oracle_mle_tilt",
+            "raw_pnp_uncapped",
+            "raw_pnp_tuned",
+            "unscaled_noisy",
+        ]
+        if methods is None
+        else methods
+    )
 
     out = Path(out)
     data_dir = out / "data"
@@ -696,7 +834,7 @@ def run_experiment(
                             eta,
                             h,
                             raw_step_cap,
-                            _torch_generator(device, batch_seed + 17 + 100 * mi),
+                            _torch_generator(device, batch_seed + 17),
                             sigma_probe_stride,
                         )
                         batch_metrics = summarize_batch(prior, xhat, meas, sigmas)
@@ -778,22 +916,25 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="toy_blind_splitting/results/highd_likelihood_tilt_gpu")
     parser.add_argument("--seed", type=int, default=909)
-    parser.add_argument("--d-values", default="200,500,1000,2000")
+    parser.add_argument("--d-values", default="500,1000")
     parser.add_argument("--measurement-ratio", type=float, default=0.5)
-    parser.add_argument("--eta-values", default="1e-3,3e-3,1e-2")
-    parser.add_argument("--n-trials", type=int, default=64)
+    parser.add_argument("--eta-values", default="1e-5,3e-5,1e-4,3e-4,1e-3,3e-3,1e-2,3e-2")
+    parser.add_argument("--n-trials", type=int, default=32)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--n-steps", type=int, default=80)
     parser.add_argument("--components", type=int, default=16)
-    parser.add_argument("--grid-size", type=int, default=41)
+    parser.add_argument("--grid-size", type=int, default=49)
     parser.add_argument("--sigma-min", type=float, default=0.005)
-    parser.add_argument("--sigma-max", type=float, default=3.0)
+    parser.add_argument("--sigma-max", type=float, default=10.0)
     parser.add_argument("--schedule-sigma-min", type=float, default=0.02)
     parser.add_argument("--sigma0", type=float, default=1.2)
     parser.add_argument("--noise-std", type=float, default=0.08)
     parser.add_argument("--h", type=float, default=0.05)
     parser.add_argument("--raw-step-cap", type=float, default=3e-4)
-    parser.add_argument("--methods", default="scheduled_tilt,blind_mle_tilt,raw_pnp_tuned,unscaled_noisy")
+    parser.add_argument(
+        "--methods",
+        default="scheduled_tilt,blind_mle_tilt,oracle_mle_tilt,raw_pnp_uncapped,raw_pnp_tuned,unscaled_noisy",
+    )
     parser.add_argument("--sigma-probe-stride", type=int, default=10)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--dtype", choices=["float32", "float64"], default="float32")

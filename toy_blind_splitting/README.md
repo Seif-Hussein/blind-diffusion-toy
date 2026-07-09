@@ -97,14 +97,16 @@ python -m toy_blind_splitting.src.experiments_closed_loop \
   --n-trials 50
 ```
 
-GPU-oriented high-dimensional likelihood-tilt run:
+GPU-oriented eta-focused high-dimensional likelihood-tilt run:
 
 ```bash
 python -m toy_blind_splitting.src.experiments_highd_likelihood_tilt_torch \
   --device auto \
-  --d-values 200,500,1000,2000 \
-  --eta-values 1e-3,3e-3,1e-2 \
-  --n-trials 64 \
+  --d-values 500,1000 \
+  --eta-values 1e-5,3e-5,1e-4,3e-4,1e-3,3e-3,1e-2,3e-2 \
+  --methods scheduled_tilt,blind_mle_tilt,oracle_mle_tilt,raw_pnp_uncapped,raw_pnp_tuned,unscaled_noisy \
+  --sigma-max 10.0 \
+  --n-trials 32 \
   --batch-size 16 \
   --n-steps 80
 ```
@@ -113,6 +115,12 @@ The Colab notebook for the same GPU target is:
 
 ```text
 toy_blind_splitting/notebooks/highd_likelihood_tilt_gpu_colab.ipynb
+```
+
+Public Colab URL:
+
+```text
+https://colab.research.google.com/github/Seif-Hussein/blind-diffusion-toy/blob/master/toy_blind_splitting/notebooks/highd_likelihood_tilt_gpu_colab.ipynb
 ```
 
 This GPU path tests the lightweight first-order likelihood-tilt setting only.

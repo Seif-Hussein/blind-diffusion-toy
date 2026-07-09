@@ -16,6 +16,7 @@ env/
 
 # Generated experiment artifacts
 toy_blind_splitting/results/
+toy_blind_splitting/colab_results/
 results/
 *.npz
 *.npy
@@ -28,4 +29,3 @@ results/
 Thumbs.db
 .vscode/
 .idea/
-
