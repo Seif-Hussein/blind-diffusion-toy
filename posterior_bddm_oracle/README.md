@@ -132,8 +132,24 @@ locally and switches to CUDA automatically when a GPU runtime is available.
 
 ## CUDA closed-loop hierarchy
 
-After the one-step correction and amplitude sweeps, run the reduced closed-loop
-posterior-BDDM hierarchy:
+Before comparing split methods in closed loop, calibrate the posterior oracle:
+
+```bash
+python -m posterior_bddm_oracle.src.experiments_posterior_oracle_calibration_torch \
+  --device auto \
+  --prior ellipse \
+  --d-values 100,500 \
+  --h-values 0.005,0.01,0.02,0.05 \
+  --beta-values 0,0.005,0.01,0.03,0.05 \
+  --n-steps-values 40,80,160 \
+  --measurement-ratios 0.5 \
+  --noise-stds 0.08 \
+  --n-trials 128 \
+  --out posterior_bddm_oracle/results_cuda_oracle_calibration
+```
+
+Then run the reduced closed-loop posterior-BDDM hierarchy with calibrated
+settings:
 
 ```bash
 python -m posterior_bddm_oracle.src.experiments_posterior_closed_loop_torch \
