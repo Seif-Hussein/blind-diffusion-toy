@@ -110,7 +110,22 @@ python -m posterior_bddm_oracle.src.experiments_posterior_oracle_torch \
   --split-methods gradient,pdhg,hqs
 ```
 
+If the best eta is always the largest eta in the report, run an amplitude sweep:
+
+```bash
+python -m posterior_bddm_oracle.src.experiments_posterior_oracle_torch \
+  --device auto \
+  --prior ellipse \
+  --d-values 50,100,500 \
+  --sigmas 0.3,1.0 \
+  --eta-values 0.01,0.03,0.1,0.3,1.0 \
+  --measurement-ratios 0.5 \
+  --noise-stds 0.08 \
+  --n-samples 500 \
+  --split-methods gradient,pdhg,hqs \
+  --out posterior_bddm_oracle/results_cuda_eta_sweep
+```
+
 This runner computes exact dense-GMM posterior components, posterior-smoothed
 denoisers, `c_star`, and split corrections using Torch tensors. It runs on CPU
 locally and switches to CUDA automatically when a GPU runtime is available.
-

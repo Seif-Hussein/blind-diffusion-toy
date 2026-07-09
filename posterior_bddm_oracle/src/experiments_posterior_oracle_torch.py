@@ -39,6 +39,9 @@ from .torch_oracle_tools import (
 METRIC_NAMES = [
     "rel_error",
     "cosine",
+    "norm_ratio",
+    "gain_to_target",
+    "gain_fit_rel_error",
     "c_star_norm",
     "c_split_norm",
     "c_star_normal_fraction",
@@ -113,17 +116,22 @@ def _write_report(
     lines.append(f"Dtype: `{payload['dtype']}`")
     lines.append("")
     lines.append("## Aggregate Split Alignment")
-    lines.append("| split | median rel error | median cosine |")
-    lines.append("|---|---:|---:|")
+    lines.append("| split | median rel error | median cosine | median norm ratio | median gain fit error |")
+    lines.append("|---|---:|---:|---:|---:|")
     for mi, split in enumerate(splits):
         rel = np.nanmedian(metrics[:, :, :, mi, :, rel_idx])
         cos = np.nanmedian(metrics[:, :, :, mi, :, cos_idx])
-        lines.append(f"| `{split}` | {rel:.4e} | {cos:.4f} |")
+        norm_ratio = np.nanmedian(metrics[:, :, :, mi, :, METRIC_NAMES.index("norm_ratio")])
+        gain_fit = np.nanmedian(metrics[:, :, :, mi, :, METRIC_NAMES.index("gain_fit_rel_error")])
+        lines.append(f"| `{split}` | {rel:.4e} | {cos:.4f} | {norm_ratio:.4e} | {gain_fit:.4e} |")
     lines.append("")
 
     lines.append("## Best Eta By Condition")
-    lines.append("| d | ratio | noise | sigma | split | best eta | median rel error | median cosine |")
-    lines.append("|---:|---:|---:|---:|---|---:|---:|---:|")
+    lines.append(
+        "| d | ratio | noise | sigma | split | best eta | median rel error | "
+        "median cosine | median norm ratio | edge best |"
+    )
+    lines.append("|---:|---:|---:|---:|---|---:|---:|---:|---:|")
     for ci, cond in enumerate(conditions):
         d, _k, ratio, _m, noise_std = cond
         for si, sigma in enumerate(sigmas):
@@ -131,10 +139,20 @@ def _write_report(
                 rel_by_eta = np.nanmedian(metrics[ci, si, :, mi, :, rel_idx], axis=1)
                 best = int(np.nanargmin(rel_by_eta))
                 cos = np.nanmedian(metrics[ci, si, best, mi, :, cos_idx])
+                norm_ratio = np.nanmedian(
+                    metrics[ci, si, best, mi, :, METRIC_NAMES.index("norm_ratio")]
+                )
+                edge_best = best == 0 or best == len(etas) - 1
                 lines.append(
                     f"| {int(d)} | {ratio:g} | {noise_std:g} | {sigma:g} | `{split}` | "
-                    f"{etas[best]:g} | {rel_by_eta[best]:.4e} | {cos:.4f} |"
+                    f"{etas[best]:g} | {rel_by_eta[best]:.4e} | {cos:.4f} | "
+                    f"{norm_ratio:.4e} | {edge_best} |"
                 )
+    lines.append("")
+    lines.append(
+        "`edge best=True` means the best eta was on a sweep boundary, so the eta range is not yet resolving "
+        "the optimum."
+    )
     lines.append("")
 
     lines.append("## Scale Boundary Hits")
@@ -279,11 +297,32 @@ def run_experiment(
                         metrics[ci, si, ei, mi, :, METRIC_NAMES.index("cosine")] = (
                             cosine_similarity(c_split, c_star).detach().cpu().numpy().astype(np.float32)
                         )
+                        c_split_norm = torch.linalg.norm(c_split, dim=1)
+                        c_star_norm = torch.linalg.norm(c_star, dim=1)
+                        dot = torch.sum(c_split * c_star, dim=1)
+                        gain_to_target = dot / c_split_norm.square().clamp_min(1e-30)
+                        gain_fit = torch.linalg.norm(
+                            gain_to_target[:, None] * c_split - c_star,
+                            dim=1,
+                        ) / c_star_norm.clamp_min(1e-15)
+                        metrics[ci, si, ei, mi, :, METRIC_NAMES.index("norm_ratio")] = (
+                            (c_split_norm / c_star_norm.clamp_min(1e-15))
+                            .detach()
+                            .cpu()
+                            .numpy()
+                            .astype(np.float32)
+                        )
+                        metrics[ci, si, ei, mi, :, METRIC_NAMES.index("gain_to_target")] = (
+                            gain_to_target.detach().cpu().numpy().astype(np.float32)
+                        )
+                        metrics[ci, si, ei, mi, :, METRIC_NAMES.index("gain_fit_rel_error")] = (
+                            gain_fit.detach().cpu().numpy().astype(np.float32)
+                        )
                         metrics[ci, si, ei, mi, :, METRIC_NAMES.index("c_star_norm")] = (
-                            torch.linalg.norm(c_star, dim=1).detach().cpu().numpy().astype(np.float32)
+                            c_star_norm.detach().cpu().numpy().astype(np.float32)
                         )
                         metrics[ci, si, ei, mi, :, METRIC_NAMES.index("c_split_norm")] = (
-                            torch.linalg.norm(c_split, dim=1).detach().cpu().numpy().astype(np.float32)
+                            c_split_norm.detach().cpu().numpy().astype(np.float32)
                         )
                         metrics[ci, si, ei, mi, :, METRIC_NAMES.index("c_star_normal_fraction")] = (
                             c_star_normal.detach().cpu().numpy().astype(np.float32)
@@ -425,4 +464,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
