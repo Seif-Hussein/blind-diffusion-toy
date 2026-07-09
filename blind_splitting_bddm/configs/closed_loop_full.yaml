@@ -1,0 +1,39 @@
+seed: 123
+device: cuda
+dtype: float32
+save_dir: blind_splitting_bddm/results/closed_loop_full
+
+prior:
+  type: ellipse
+  intrinsic_dim: 2
+  ambient_dim: 500
+  n_components: 64
+  tangent_std: 0.10
+  normal_std: 0.02
+  diag_noise: 1.0e-4
+
+sigma_grid:
+  min: 0.01
+  max: 3.0
+  n: 128
+  spacing: log
+
+measurement:
+  type: random_gaussian
+  measurement_ratio: 0.5
+  noise_std: 0.05
+
+experiments:
+  n_trials: 256
+  d_values: [50, 100, 500]
+  etas: [0.001, 0.003, 0.01, 0.03]
+  measurement_ratios: [0.25, 0.5, 1.0]
+  noise_std: [0.05, 0.1]
+  split_methods: [gradient, pdhg]
+  gammas: [50, 100, 500]
+  closed_loop_steps: 100
+  beta: 0.0
+  sigma0: 1.2
+  schedule_sigma_min: 0.02
+  h: 0.05
+  init: posterior
