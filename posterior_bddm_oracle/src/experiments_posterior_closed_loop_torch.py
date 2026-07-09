@@ -459,6 +459,7 @@ def run_experiment(
     sigma_max: float,
     sigma0: float,
     schedule_sigma_min: float,
+    init: str,
     A_type: str,
     split_name: str,
     h: float,
@@ -506,9 +507,19 @@ def run_experiment(
             A = make_operator(d, m, A_type, gen, device, dtype)
             _x_true, y_obs = make_measurement(prior, A, noise_std, gen)
             posterior_prior, posterior = exact_linear_posterior_gmm(prior, A, y_obs, noise_std)
-            y0 = prior.mean[None, :] + float(sigma0) * torch.randn(
-                (n_trials, d), device=device, dtype=dtype, generator=make_generator(device, seed + 200000 * ci)
-            )
+            init_gen = make_generator(device, seed + 200000 * ci)
+            if init == "posterior":
+                x0, _ids = posterior_prior.sample(n_trials, init_gen)
+                y0 = x0 + float(sigma0) * torch.randn((n_trials, d), device=device, dtype=dtype, generator=init_gen)
+            elif init == "prior_sample":
+                x0, _ids = prior.sample(n_trials, init_gen)
+                y0 = x0 + float(sigma0) * torch.randn((n_trials, d), device=device, dtype=dtype, generator=init_gen)
+            elif init == "prior_mean":
+                y0 = prior.mean[None, :] + float(sigma0) * torch.randn(
+                    (n_trials, d), device=device, dtype=dtype, generator=init_gen
+                )
+            else:
+                raise ValueError(f"unknown init mode: {init}")
             final_samples = np.full((n_trials, len(METHOD_NAMES), d), np.nan, dtype=np.float32)
             print(
                 f"condition {ci + 1}/{conditions.shape[0]}: d={d}, ratio={ratio:g}, noise={noise_std:g}, "
@@ -533,7 +544,7 @@ def run_experiment(
                     raw_hqs_tau,
                     pdhg_gamma,
                     hqs_tau,
-                    make_generator(device, seed + 300000 * ci + 101 * mi),
+                    make_generator(device, seed + 300000 * ci),
                 )
                 final_samples[:, mi] = final_x.detach().cpu().numpy().astype(np.float32)
                 histories[ci, :, mi] = hist
@@ -603,6 +614,7 @@ def run_experiment(
         "sigma_max": sigma_max,
         "sigma0": sigma0,
         "schedule_sigma_min": schedule_sigma_min,
+        "init": init,
         "A_type": A_type,
         "split_name": split_name,
         "h": h,
@@ -638,6 +650,7 @@ def main() -> None:
     parser.add_argument("--sigma-max", type=float, default=3.0)
     parser.add_argument("--sigma0", type=float, default=1.2)
     parser.add_argument("--schedule-sigma-min", type=float, default=0.02)
+    parser.add_argument("--init", choices=["posterior", "prior_sample", "prior_mean"], default="posterior")
     parser.add_argument("--A-type", choices=["random", "mask"], default="random")
     parser.add_argument("--split", choices=["gradient", "pdhg", "hqs"], default="gradient")
     parser.add_argument("--h", type=float, default=0.05)
@@ -674,6 +687,7 @@ def main() -> None:
         sigma_max=args.sigma_max,
         sigma0=args.sigma0,
         schedule_sigma_min=args.schedule_sigma_min,
+        init=args.init,
         A_type=args.A_type,
         split_name=args.split,
         h=args.h,

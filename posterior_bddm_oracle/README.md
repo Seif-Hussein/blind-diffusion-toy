@@ -145,6 +145,8 @@ python -m posterior_bddm_oracle.src.experiments_posterior_closed_loop_torch \
   --noise-stds 0.08 \
   --n-trials 64 \
   --n-steps 40 \
+  --init posterior \
+  --beta 0.05 \
   --split gradient \
   --out posterior_bddm_oracle/results_cuda_closed_loop
 ```
@@ -164,3 +166,7 @@ The key output is:
 ```text
 posterior_bddm_oracle/results_cuda_closed_loop/data/closed_loop_cuda_report.md
 ```
+
+Use `--init posterior` for the oracle hierarchy because the posterior BDDM
+drift assumes states lie near `pi_sigma`. The older `--init prior_mean` mode is
+kept as a stress test, but it is not the clean oracle diagnostic.
